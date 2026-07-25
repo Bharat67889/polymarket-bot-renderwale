@@ -3,7 +3,7 @@ const axios = require("axios");
 
 const WS_URL = "wss://ws-subscriptions-clob.polymarket.com/ws/market";
 // 🚨 APNA APPS SCRIPT WEBAPP URL YAHAN REPLACE KARO
-const GOOGLE_SHEET_WEBHOOK_URL = "YOUR_GOOGLE_APPS_SCRIPT_WEB_APP_URL_HERE";
+const GOOGLE_SHEET_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbxaG2uj8IvOJ2cFxK1-Dz6R9kXqQ_Pyk7ckU2NqUUSHGFuevM219L6-XWMO2vJl4dXm/exec";
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
