@@ -25,7 +25,7 @@ let pendingLogsQueue = [];
 
 async function sendBatchToGoogleSheet() {
   if (pendingLogsQueue.length === 0) {
-    console.log("📊 [5-MIN SYNC] No new logs to sync right now.");
+    console.log("📊 [EVENT SYNC] No new logs to sync for previous slot.");
     return;
   }
 
@@ -33,28 +33,23 @@ async function sendBatchToGoogleSheet() {
   const batchToSend = [...pendingLogsQueue];
   pendingLogsQueue = []; // Resetting buffer for next batch
 
-  console.log(`\n⏳ [5-MIN SYNC] Syncing ${batchToSend.length} new log(s) to Google Sheets...`);
+  console.log(`\n⏳ [EVENT SYNC] Sending previous event data (${batchToSend.length} log(s)) to Google Sheets...`);
 
   try {
-    const res = await axios.post(GOOGLE_SHEET_WEBHOOK_URL, { rows: batchToSend }, { timeout: 10000 });
+    const res = await axios.post(GOOGLE_SHEET_WEBHOOK_URL, { rows: batchToSend }, { timeout: 30000 });
     if (res.data?.status === "success") {
-      console.log(`✅ [SHEET SYNC SUCCESS] Added ${res.data.added} rows to Sheet. Queue reset for next batch.\n`);
+      console.log(`✅ [SHEET SYNC SUCCESS] Added ${res.data.added} rows to Sheet for previous event.\n`);
     } else {
       console.log("⚠️ [SHEET SYNC WARN] Sheet response:", res.data);
     }
   } catch (err) {
-    console.log("❌ [SHEET SYNC ERROR] Failed to send logs. Re-queuing logs for next sync cycle...");
-    // Failure par data loss roakne ke liye logs ko wapas Queue me add kar do
-    pendingLogsQueue = [...batchToSend, ...pendingLogsQueue];
+    console.log("❌ [SHEET SYNC ERROR] Failed to send logs for previous event.");
   }
 }
 
-// ⏰ Automatic 5-Minute Interval (Har 5 Minute (300,000 ms) me sync chalega)
-setInterval(sendBatchToGoogleSheet, 5 * 60 * 1000);
-
 async function trackContinuousMarkets() {
   console.log("==================================================");
-  console.log("🚀 DUAL-ENGINE DIP TRACKER (+ 5-MIN SHEET BATCH SYNC)");
+  console.log("🚀 DUAL-ENGINE DIP TRACKER (+ EVENT-TRIGGERED SHEET SYNC)");
   console.log("==================================================\n");
 
   let activeSlot = 0;
@@ -81,6 +76,12 @@ async function trackContinuousMarkets() {
         const market = res.data?.[0]?.markets?.find(m => m.active && !m.closed);
 
         if (market) {
+          // 🛑 NAYA EVENT AAYA! Pehle PICHHLE Event ka poora data Sheet ko bhej do
+          if (activeSlot !== 0) {
+            console.log(`\n🔄 [NEW EVENT DETECTED] Sending previous event logs before starting ${liveSlug}...`);
+            await sendBatchToGoogleSheet();
+          }
+
           activeSlot = currentSlot;
 
           if (currentWs) { try { currentWs.close(); } catch (e) {} }
@@ -90,7 +91,7 @@ async function trackContinuousMarkets() {
           console.log(`📌 ${bannerText}`);
           console.log(`==================================================`);
 
-          // Header Row inside Sheet Queue
+          // Header Row inside Sheet Queue for NEW Event
           pendingLogsQueue.push(["---", bannerText, "---", "---", "---", "---"]);
 
           const tokenIds = JSON.parse(market.clobTokenIds);
@@ -116,7 +117,7 @@ function startSlotEngine(yesAsset, noAsset, slotEndTime, slug) {
   const queueLogForSheet = (timeET, timerStr, side, tier, priceVal) => {
     // Array order: [Timestamp, Slot_Slug, Timer_Left, Side, Tier, Price]
     pendingLogsQueue.push([timeET, slug, timerStr, side, tier, priceVal]);
-    console.log(`📝 [LOG BUFFERED] Total queued for next sync: ${pendingLogsQueue.length}`);
+    console.log(`📝 [LOG BUFFERED] Total queued for this event: ${pendingLogsQueue.length}`);
   };
 
   const checkAndTriggerDoubleHit = (timeET, timerStr) => {
