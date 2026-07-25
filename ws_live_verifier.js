@@ -1,3 +1,19 @@
+const http = require('http');
+const PORT = process.env.PORT || 3000;
+
+http.createServer((req, res) => {
+  res.writeHead(200, { 'Content-Type': 'text/plain' });
+  res.end('Bot is running alive 24/7!\n');
+}).listen(PORT, () => {
+  console.log(`Dummy server listening on port ${PORT}`);
+});
+
+
+
+
+
+
+
 const WebSocket = require("ws");
 const axios = require("axios");
 
