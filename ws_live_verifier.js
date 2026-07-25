@@ -8,12 +8,6 @@ http.createServer((req, res) => {
   console.log(`Dummy server listening on port ${PORT}`);
 });
 
-
-
-
-
-
-
 const WebSocket = require("ws");
 const axios = require("axios");
 
@@ -31,15 +25,15 @@ let pendingLogsQueue = [];
 
 async function sendBatchToGoogleSheet() {
   if (pendingLogsQueue.length === 0) {
-    console.log("📊 [HOURLY SYNC] No new logs to sync for this hour.");
+    console.log("📊 [5-MIN SYNC] No new logs to sync right now.");
     return;
   }
 
   // Current batch ko copy karke Queue clear kar do taaki repeat na ho
   const batchToSend = [...pendingLogsQueue];
-  pendingLogsQueue = []; // Resetting buffer for next hour
+  pendingLogsQueue = []; // Resetting buffer for next batch
 
-  console.log(`\n⏳ [HOURLY SYNC] Syncing ${batchToSend.length} new log(s) to Google Sheets...`);
+  console.log(`\n⏳ [5-MIN SYNC] Syncing ${batchToSend.length} new log(s) to Google Sheets...`);
 
   try {
     const res = await axios.post(GOOGLE_SHEET_WEBHOOK_URL, { rows: batchToSend }, { timeout: 10000 });
@@ -55,12 +49,12 @@ async function sendBatchToGoogleSheet() {
   }
 }
 
-// ⏰ Automatic Hourly Interval (Har 1 Ghante (3,600,000 ms) me sync chalega)
-setInterval(sendBatchToGoogleSheet, 60 * 60 * 1000);
+// ⏰ Automatic 5-Minute Interval (Har 5 Minute (300,000 ms) me sync chalega)
+setInterval(sendBatchToGoogleSheet, 5 * 60 * 1000);
 
 async function trackContinuousMarkets() {
   console.log("==================================================");
-  console.log("🚀 DUAL-ENGINE DIP TRACKER (+ HOURLY SHEET BATCH SYNC)");
+  console.log("🚀 DUAL-ENGINE DIP TRACKER (+ 5-MIN SHEET BATCH SYNC)");
   console.log("==================================================\n");
 
   let activeSlot = 0;
@@ -122,7 +116,7 @@ function startSlotEngine(yesAsset, noAsset, slotEndTime, slug) {
   const queueLogForSheet = (timeET, timerStr, side, tier, priceVal) => {
     // Array order: [Timestamp, Slot_Slug, Timer_Left, Side, Tier, Price]
     pendingLogsQueue.push([timeET, slug, timerStr, side, tier, priceVal]);
-    console.log(`📝 [LOG BUFFERED] Total queued for next hourly sync: ${pendingLogsQueue.length}`);
+    console.log(`📝 [LOG BUFFERED] Total queued for next sync: ${pendingLogsQueue.length}`);
   };
 
   const checkAndTriggerDoubleHit = (timeET, timerStr) => {
