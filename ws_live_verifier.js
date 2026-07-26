@@ -11,11 +11,41 @@ http.createServer((req, res) => {
 const WebSocket = require("ws");
 const axios = require("axios");
 
+// =========================================================================
+// 🎛️ USER CONFIGURATION VARIABLES (BUS YAHAN CHANGES KARO)
+// =========================================================================
+
+// 1. COIN & TIMEFRAME:
+// Options: "BTC_5M", "BTC_15M", "ETH_5M", "ETH_15M", "SOL_5M", "SOL_15M"
+const CONFIG_ASSET = "BTC_5M";
+
+// 2. PRICE TIERS TO DETECT:
+// Options: [0.01] (sirf 1c), [0.05] (sirf 5c), ya [0.01, 0.05] (dono 1c & 5c)
+const CONFIG_TARGET_TIERS = [0.01];
+
+// =========================================================================
+
 const WS_URL = "wss://ws-subscriptions-clob.polymarket.com/ws/market";
 // 🚨 APNA APPS SCRIPT WEBAPP URL YAHAN REPLACE KARO
 const GOOGLE_SHEET_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbxaG2uj8IvOJ2cFxK1-Dz6R9kXqQ_Pyk7ckU2NqUUSHGFuevM219L6-XWMO2vJl4dXm/exec";
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+// Helper: Asset Config Parser
+function getAssetConfig(assetKey) {
+  const parts = assetKey.toUpperCase().split("_");
+  const coin = parts[0].toLowerCase(); // btc, eth, sol
+  const timeframe = parts[1]; // 5M or 15M
+
+  const slotSeconds = timeframe === "15M" ? 900 : 300;
+  const slugTimeframe = timeframe === "15M" ? "15m" : "5m";
+
+  return {
+    coin,
+    slotSeconds,
+    slugPrefix: `${coin}-updown-${slugTimeframe}`
+  };
+}
 
 let currentWs = null;
 let pollingInterval = null;
@@ -29,9 +59,8 @@ async function sendBatchToGoogleSheet() {
     return;
   }
 
-  // Current batch ko copy karke Queue clear kar do taaki repeat na ho
   const batchToSend = [...pendingLogsQueue];
-  pendingLogsQueue = []; // Resetting buffer for next batch
+  pendingLogsQueue = []; 
 
   console.log(`\n⏳ [EVENT SYNC] Sending previous event data (${batchToSend.length} log(s)) to Google Sheets...`);
 
@@ -48,19 +77,22 @@ async function sendBatchToGoogleSheet() {
 }
 
 async function trackContinuousMarkets() {
+  const assetCfg = getAssetConfig(CONFIG_ASSET);
+
   console.log("==================================================");
-  console.log("🚀 DUAL-ENGINE DIP TRACKER (+ EVENT-TRIGGERED SHEET SYNC)");
+  console.log(`🚀 DUAL-ENGINE DIP TRACKER [${CONFIG_ASSET}]`);
+  console.log(`🎯 Active Target Tiers: ${CONFIG_TARGET_TIERS.map(t => `$${t}`).join(", ")}`);
   console.log("==================================================\n");
 
   let activeSlot = 0;
 
   while (true) {
     const now = Math.floor(Date.now() / 1000);
-    const currentSlot = now - (now % 300);
-    const slotEndSlot = currentSlot + 300;
+    const currentSlot = now - (now % assetCfg.slotSeconds);
+    const slotEndSlot = currentSlot + assetCfg.slotSeconds;
 
     if (currentSlot !== activeSlot) {
-      const liveSlug = `btc-updown-5m-${currentSlot}`;
+      const liveSlug = `${assetCfg.slugPrefix}-${currentSlot}`;
       
       const startDate = new Date(currentSlot * 1000);
       const endDate = new Date(slotEndSlot * 1000);
@@ -76,7 +108,6 @@ async function trackContinuousMarkets() {
         const market = res.data?.[0]?.markets?.find(m => m.active && !m.closed);
 
         if (market) {
-          // 🛑 NAYA EVENT AAYA! Pehle PICHHLE Event ka poora data Sheet ko bhej do
           if (activeSlot !== 0) {
             console.log(`\n🔄 [NEW EVENT DETECTED] Sending previous event logs before starting ${liveSlug}...`);
             await sendBatchToGoogleSheet();
@@ -91,7 +122,6 @@ async function trackContinuousMarkets() {
           console.log(`📌 ${bannerText}`);
           console.log(`==================================================`);
 
-          // Header Row inside Sheet Queue for NEW Event
           pendingLogsQueue.push(["---", bannerText, "---", "---", "---", "---"]);
 
           const tokenIds = JSON.parse(market.clobTokenIds);
@@ -115,7 +145,6 @@ function startSlotEngine(yesAsset, noAsset, slotEndTime, slug) {
   let yesHit = false, noHit = false, doubleHitAlertPrinted = false;
 
   const queueLogForSheet = (timeET, timerStr, side, tier, priceVal) => {
-    // Array order: [Timestamp, Slot_Slug, Timer_Left, Side, Tier, Price]
     pendingLogsQueue.push([timeET, slug, timerStr, side, tier, priceVal]);
     console.log(`📝 [LOG BUFFERED] Total queued for this event: ${pendingLogsQueue.length}`);
   };
@@ -143,8 +172,8 @@ function startSlotEngine(yesAsset, noAsset, slotEndTime, slug) {
 
     const currentTimeET = new Date().toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "2-digit", minute: "2-digit", second: "2-digit" });
 
-    // 1 CENT TIER
-    if (price <= 0.01) {
+    // 1 CENT TIER DETECTOR
+    if (CONFIG_TARGET_TIERS.includes(0.01) && price <= 0.01) {
       if (isYes && !yes1cPrinted) {
         yes1cPrinted = true; yesHit = true;
         console.log(`🔥 [${currentTimeET} ET] (Timer: ${timerStr}) -> UP (YES) TOUCHED 1¢! ($${price.toFixed(3)})`);
@@ -158,8 +187,8 @@ function startSlotEngine(yesAsset, noAsset, slotEndTime, slug) {
         checkAndTriggerDoubleHit(currentTimeET, timerStr);
       }
     } 
-    // 5 CENT TIER
-    else if (price <= 0.05) {
+    // 5 CENT TIER DETECTOR
+    else if (CONFIG_TARGET_TIERS.includes(0.05) && price <= 0.05) {
       if (isYes && !yes5cPrinted) {
         yes5cPrinted = true; yesHit = true;
         console.log(`⚡ [${currentTimeET} ET] (Timer: ${timerStr}) -> UP (YES) TOUCHED 5¢! ($${price.toFixed(3)})`);
