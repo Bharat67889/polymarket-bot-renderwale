@@ -17,7 +17,7 @@ const axios = require("axios");
 
 // 1. COIN & TIMEFRAME:
 // Options: "BTC_5M", "BTC_15M", "ETH_5M", "ETH_15M", "SOL_5M", "SOL_15M"
-const CONFIG_ASSET = "BTC_5M";
+const CONFIG_ASSET = "BTC_15M";
 
 // 2. PRICE TIERS TO DETECT:
 // Options: [0.01] (sirf 1c), [0.05] (sirf 5c), ya [0.01, 0.05] (dono 1c & 5c)
