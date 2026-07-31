@@ -1,5 +1,4 @@
 const http = require('http');
-// Port 3001 for 1-Hour script to avoid collision with 15m script
 const PORT = process.env.PORT || 3001;
 
 http.createServer((req, res) => {
@@ -16,13 +15,7 @@ const axios = require("axios");
 // 🎛️ USER CONFIGURATION VARIABLES
 // =========================================================================
 
-// 1. COIN & TIMEFRAME FOR 1-HOUR BOT:
-const CONFIG_ASSET = "BTC_1H";
-
-// 2. PRICE TIERS TO DETECT:
 const CONFIG_TARGET_TIERS = [0.01];
-
-// 3. TARGET SHEET TAB NAME:
 const TARGET_SHEET_NAME = "Btc_1hr";
 
 // =========================================================================
@@ -32,27 +25,43 @@ const GOOGLE_SHEET_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbxaG2u
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-// Helper: 1-Hour Asset Config Parser
-function getAssetConfig(assetKey) {
-  const parts = assetKey.toUpperCase().split("_");
-  const coin = parts[0].toLowerCase(); // btc
-  const timeframe = parts[1]; // 1H
+// Helper: Generates Polymarket 1-Hour Text Slug (e.g., bitcoin-up-or-down-july-31-2026-5am-et)
+function get1HourSlug(slotUnix) {
+  const dateObj = new Date(slotUnix * 1000);
 
-  // 1 Hour = 3600 seconds
-  const slotSeconds = 3600;
-  const slugTimeframe = "1h";
+  const months = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
+  
+  // Convert to NY Timezone
+  const nyDateStr = dateObj.toLocaleDateString("en-US", { timeZone: "America/New_York", year: "numeric", month: "numeric", day: "numeric" });
+  const [m, d, y] = nyDateStr.split("/").map(Number);
 
-  return {
-    coin,
-    slotSeconds,
-    slugPrefix: `${coin}-updown-${slugTimeframe}`
-  };
+  const monthName = months[m - 1];
+
+  // NY Hour (0-23)
+  const nyHourStr = dateObj.toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "numeric", hour12: false });
+  let hour = parseInt(nyHourStr, 10);
+
+  let ampm = "am";
+  let displayHour = hour;
+
+  if (hour === 0) {
+    displayHour = 12;
+    ampm = "am";
+  } else if (hour === 12) {
+    displayHour = 12;
+    ampm = "pm";
+  } else if (hour > 12) {
+    displayHour = hour - 12;
+    ampm = "pm";
+  } else {
+    ampm = "am";
+  }
+
+  return `bitcoin-up-or-down-${monthName}-${d}-${y}-${displayHour}${ampm}-et`;
 }
 
 let currentWs = null;
 let pollingInterval = null;
-
-// 🧠 IN-MEMORY BATCH BUFFER
 let pendingLogsQueue = [];
 
 async function sendBatchToGoogleSheet() {
@@ -83,22 +92,21 @@ async function sendBatchToGoogleSheet() {
 }
 
 async function trackContinuousMarkets() {
-  const assetCfg = getAssetConfig(CONFIG_ASSET);
-
   console.log("==================================================");
-  console.log(`🚀 DUAL-ENGINE DIP TRACKER [${CONFIG_ASSET}] -> Tab: ${TARGET_SHEET_NAME}`);
+  console.log(`🚀 DUAL-ENGINE DIP TRACKER [BTC_1HR] -> Tab: ${TARGET_SHEET_NAME}`);
   console.log(`🎯 Active Target Tiers: ${CONFIG_TARGET_TIERS.map(t => `$${t}`).join(", ")}`);
   console.log("==================================================\n");
 
   let activeSlot = 0;
+  const slotSeconds = 3600;
 
   while (true) {
     const now = Math.floor(Date.now() / 1000);
-    const currentSlot = now - (now % assetCfg.slotSeconds);
-    const slotEndSlot = currentSlot + assetCfg.slotSeconds;
+    const currentSlot = now - (now % slotSeconds);
+    const slotEndSlot = currentSlot + slotSeconds;
 
     if (currentSlot !== activeSlot) {
-      const liveSlug = `${assetCfg.slugPrefix}-${currentSlot}`;
+      const liveSlug = get1HourSlug(currentSlot);
       
       const startDate = new Date(currentSlot * 1000);
       const endDate = new Date(slotEndSlot * 1000);
@@ -111,7 +119,7 @@ async function trackContinuousMarkets() {
 
       try {
         const res = await axios.get(`https://gamma-api.polymarket.com/events?slug=${liveSlug}`, { timeout: 5000 });
-        const market = res.data?.[0]?.markets?.find(m => m.active && !m.closed);
+        const market = res.data?.[0]?.markets?.find(m => m.active && !m.closed) || res.data?.[0]?.markets?.[0];
 
         if (market) {
           if (activeSlot !== 0) {
@@ -130,7 +138,7 @@ async function trackContinuousMarkets() {
 
           pendingLogsQueue.push(["---", bannerText, "---", "---", "---", "---"]);
 
-          const tokenIds = JSON.parse(market.clobTokenIds);
+          const tokenIds = typeof market.clobTokenIds === "string" ? JSON.parse(market.clobTokenIds) : market.clobTokenIds;
           startSlotEngine(tokenIds[0], tokenIds[1], slotEndSlot, liveSlug);
         } else {
           await sleep(2000);
