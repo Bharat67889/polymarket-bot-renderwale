@@ -21,7 +21,7 @@ const TARGET_SHEET_NAME = "Btc_1hr";
 // =========================================================================
 
 const WS_URL = "wss://ws-subscriptions-clob.polymarket.com/ws/market";
-const GOOGLE_SHEET_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbxaG2uj8IvOJ2cFxK1-Dz6R9kXqQ_Pyk7ckU2NqUUSHGFuevM219L6-XWMO2vJl4dXm/exec";
+const GOOGLE_SHEET_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbyBAt2zPfkNG7oT_fQbV9OOSBoQ8wPjuUg6GdPt4sr3XLI4zylU0To1YMV4wCwkpp_6/exec";
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
