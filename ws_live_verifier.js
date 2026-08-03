@@ -12,30 +12,20 @@ const WebSocket = require("ws");
 const axios = require("axios");
 
 // =========================================================================
-// 🎛️ USER CONFIGURATION VARIABLES (BUS YAHAN CHANGES KARO)
+// 🎛️ USER CONFIGURATION VARIABLES
 // =========================================================================
-
-// 1. COIN & TIMEFRAME:
-// Options: "BTC_5M", "BTC_15M", "ETH_5M", "ETH_15M", "SOL_5M", "SOL_15M"
 const CONFIG_ASSET = "BTC_15M";
-
-// 2. PRICE TIERS TO DETECT:
-// Options: [0.01] (sirf 1c), [0.05] (sirf 5c), ya [0.01, 0.05] (dono 1c & 5c)
 const CONFIG_TARGET_TIERS = [0.01];
 
-// =========================================================================
-
 const WS_URL = "wss://ws-subscriptions-clob.polymarket.com/ws/market";
-// 🚨 APNA APPS SCRIPT WEBAPP URL YAHAN REPLACE KARO
 const GOOGLE_SHEET_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbyBAt2zPfkNG7oT_fQbV9OOSBoQ8wPjuUg6GdPt4sr3XLI4zylU0To1YMV4wCwkpp_6/exec";
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-// Helper: Asset Config Parser
 function getAssetConfig(assetKey) {
   const parts = assetKey.toUpperCase().split("_");
-  const coin = parts[0].toLowerCase(); // btc, eth, sol
-  const timeframe = parts[1]; // 5M or 15M
+  const coin = parts[0].toLowerCase();
+  const timeframe = parts[1];
 
   const slotSeconds = timeframe === "15M" ? 900 : 300;
   const slugTimeframe = timeframe === "15M" ? "15m" : "5m";
@@ -50,29 +40,24 @@ function getAssetConfig(assetKey) {
 let currentWs = null;
 let pollingInterval = null;
 
-// 🧠 IN-MEMORY BATCH BUFFER
-let pendingLogsQueue = [];
+// Temporary queue for current slot
+let slotLogsQueue = [];
+let doubleHitOccurred = false;
 
-async function sendBatchToGoogleSheet() {
-  if (pendingLogsQueue.length === 0) {
-    console.log("📊 [EVENT SYNC] No new logs to sync for previous slot.");
-    return;
-  }
+async function sendBatchToGoogleSheet(batchToSend) {
+  if (batchToSend.length === 0) return;
 
-  const batchToSend = [...pendingLogsQueue];
-  pendingLogsQueue = []; 
-
-  console.log(`\n⏳ [EVENT SYNC] Sending previous event data (${batchToSend.length} log(s)) to Google Sheets...`);
+  console.log(`\n⏳ [EVENT SYNC] Double Hit Found! Sending ${batchToSend.length} rows to Google Sheets...`);
 
   try {
     const res = await axios.post(GOOGLE_SHEET_WEBHOOK_URL, { rows: batchToSend }, { timeout: 30000 });
     if (res.data?.status === "success") {
-      console.log(`✅ [SHEET SYNC SUCCESS] Added ${res.data.added} rows to Sheet for previous event.\n`);
+      console.log(`✅ [SHEET SYNC SUCCESS] Added Double Hit event logs to Sheet!\n`);
     } else {
       console.log("⚠️ [SHEET SYNC WARN] Sheet response:", res.data);
     }
   } catch (err) {
-    console.log("❌ [SHEET SYNC ERROR] Failed to send logs for previous event.");
+    console.log("❌ [SHEET SYNC ERROR] Failed to send logs to Google Sheet.");
   }
 }
 
@@ -82,6 +67,7 @@ async function trackContinuousMarkets() {
   console.log("==================================================");
   console.log(`🚀 DUAL-ENGINE DIP TRACKER [${CONFIG_ASSET}]`);
   console.log(`🎯 Active Target Tiers: ${CONFIG_TARGET_TIERS.map(t => `$${t}`).join(", ")}`);
+  console.log("🎯 FILTER MODE: ONLY DOUBLE HITS WILL BE SENT TO SHEET");
   console.log("==================================================\n");
 
   let activeSlot = 0;
@@ -108,12 +94,19 @@ async function trackContinuousMarkets() {
         const market = res.data?.[0]?.markets?.find(m => m.active && !m.closed);
 
         if (market) {
+          // Send previous slot data ONLY IF DOUBLE HIT OCCURRED
           if (activeSlot !== 0) {
-            console.log(`\n🔄 [NEW EVENT DETECTED] Sending previous event logs before starting ${liveSlug}...`);
-            await sendBatchToGoogleSheet();
+            if (doubleHitOccurred) {
+              await sendBatchToGoogleSheet(slotLogsQueue);
+            } else {
+              console.log(`ℹ️ [SLOT ENDED] No Double Hit in slot ${activeSlot}. Logs ignored.`);
+            }
           }
 
+          // Reset buffers for NEW Slot
           activeSlot = currentSlot;
+          slotLogsQueue = [];
+          doubleHitOccurred = false;
 
           if (currentWs) { try { currentWs.close(); } catch (e) {} }
           if (pollingInterval) { clearInterval(pollingInterval); }
@@ -122,7 +115,8 @@ async function trackContinuousMarkets() {
           console.log(`📌 ${bannerText}`);
           console.log(`==================================================`);
 
-          pendingLogsQueue.push(["---", bannerText, "---", "---", "---", "---"]);
+          // Clean banner row format (B, C, D, E, F columns spread)
+          slotLogsQueue.push(["---", bannerText, "---", "---", "---", "---"]);
 
           const tokenIds = JSON.parse(market.clobTokenIds);
           startSlotEngine(tokenIds[0], tokenIds[1], slotEndSlot, liveSlug);
@@ -142,19 +136,19 @@ async function trackContinuousMarkets() {
 
 function startSlotEngine(yesAsset, noAsset, slotEndTime, slug) {
   let yes1cPrinted = false, yes5cPrinted = false, no1cPrinted = false, no5cPrinted = false;
-  let yesHit = false, noHit = false, doubleHitAlertPrinted = false;
+  let yesHit = false, noHit = false;
 
   const queueLogForSheet = (timeET, timerStr, side, tier, priceVal) => {
-    pendingLogsQueue.push([timeET, slug, timerStr, side, tier, priceVal]);
-    console.log(`📝 [LOG BUFFERED] Total queued for this event: ${pendingLogsQueue.length}`);
+    slotLogsQueue.push([timeET, slug, timerStr, side, tier, priceVal]);
+    console.log(`📝 [LOG BUFFERED] Slot Queue count: ${slotLogsQueue.length}`);
   };
 
   const checkAndTriggerDoubleHit = (timeET, timerStr) => {
-    if (yesHit && noHit && !doubleHitAlertPrinted) {
-      doubleHitAlertPrinted = true;
+    if (yesHit && noHit && !doubleHitOccurred) {
+      doubleHitOccurred = true; // Mark this slot valid for Sheet export!
       const ticks = "✅✅✅✅✅✅✅✅✅✅";
       console.log(`\n${ticks} DOUBLE HIT DETECTED! ${ticks}\n`);
-      pendingLogsQueue.push([timeET, slug, timerStr, `${ticks} BOTH SIDES HIT ${ticks}`, "DOUBLE_HIT", "ALERT"]);
+      slotLogsQueue.push([timeET, slug, timerStr, `${ticks} BOTH SIDES HIT ${ticks}`, "DOUBLE_HIT", "ALERT"]);
     }
   };
 
