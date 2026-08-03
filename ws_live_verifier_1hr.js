@@ -25,55 +25,38 @@ const GOOGLE_SHEET_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbyBAt2
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-// Helper: Generates Polymarket 1-Hour Text Slug (e.g., bitcoin-up-or-down-july-31-2026-5am-et)
 function get1HourSlug(slotUnix) {
   const dateObj = new Date(slotUnix * 1000);
-
   const months = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
   
-  // Convert to NY Timezone
   const nyDateStr = dateObj.toLocaleDateString("en-US", { timeZone: "America/New_York", year: "numeric", month: "numeric", day: "numeric" });
   const [m, d, y] = nyDateStr.split("/").map(Number);
-
   const monthName = months[m - 1];
 
-  // NY Hour (0-23)
   const nyHourStr = dateObj.toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "numeric", hour12: false });
   let hour = parseInt(nyHourStr, 10);
 
   let ampm = "am";
   let displayHour = hour;
 
-  if (hour === 0) {
-    displayHour = 12;
-    ampm = "am";
-  } else if (hour === 12) {
-    displayHour = 12;
-    ampm = "pm";
-  } else if (hour > 12) {
-    displayHour = hour - 12;
-    ampm = "pm";
-  } else {
-    ampm = "am";
-  }
+  if (hour === 0) { displayHour = 12; ampm = "am"; }
+  else if (hour === 12) { displayHour = 12; ampm = "pm"; }
+  else if (hour > 12) { displayHour = hour - 12; ampm = "pm"; }
+  else { ampm = "am"; }
 
   return `bitcoin-up-or-down-${monthName}-${d}-${y}-${displayHour}${ampm}-et`;
 }
 
 let currentWs = null;
 let pollingInterval = null;
-let pendingLogsQueue = [];
 
-async function sendBatchToGoogleSheet() {
-  if (pendingLogsQueue.length === 0) {
-    console.log("📊 [EVENT SYNC 1HR] No new logs to sync for previous slot.");
-    return;
-  }
+let slotLogsQueue = [];
+let doubleHitOccurred = false;
 
-  const batchToSend = [...pendingLogsQueue];
-  pendingLogsQueue = []; 
+async function sendBatchToGoogleSheet(batchToSend) {
+  if (batchToSend.length === 0) return;
 
-  console.log(`\n⏳ [EVENT SYNC 1HR] Sending previous 1-Hour event data (${batchToSend.length} log(s)) to Google Sheets [Tab: ${TARGET_SHEET_NAME}]...`);
+  console.log(`\n⏳ [EVENT SYNC 1HR] Double Hit Found! Sending ${batchToSend.length} rows to Sheet Tab: '${TARGET_SHEET_NAME}'...`);
 
   try {
     const res = await axios.post(GOOGLE_SHEET_WEBHOOK_URL, { 
@@ -82,12 +65,12 @@ async function sendBatchToGoogleSheet() {
     }, { timeout: 30000 });
 
     if (res.data?.status === "success") {
-      console.log(`✅ [SHEET SYNC SUCCESS 1HR] Added ${res.data.added} rows to '${TARGET_SHEET_NAME}' Sheet.\n`);
+      console.log(`✅ [SHEET SYNC SUCCESS 1HR] Added rows to '${TARGET_SHEET_NAME}' Sheet.\n`);
     } else {
       console.log("⚠️ [SHEET SYNC WARN 1HR] Sheet response:", res.data);
     }
   } catch (err) {
-    console.log("❌ [SHEET SYNC ERROR 1HR] Failed to send logs for previous 1-Hour event.");
+    console.log("❌ [SHEET SYNC ERROR 1HR] Failed to send logs for 1-Hour event.");
   }
 }
 
@@ -95,6 +78,7 @@ async function trackContinuousMarkets() {
   console.log("==================================================");
   console.log(`🚀 DUAL-ENGINE DIP TRACKER [BTC_1HR] -> Tab: ${TARGET_SHEET_NAME}`);
   console.log(`🎯 Active Target Tiers: ${CONFIG_TARGET_TIERS.map(t => `$${t}`).join(", ")}`);
+  console.log("🎯 FILTER MODE: ONLY DOUBLE HITS WILL BE SENT TO SHEET");
   console.log("==================================================\n");
 
   let activeSlot = 0;
@@ -123,11 +107,16 @@ async function trackContinuousMarkets() {
 
         if (market) {
           if (activeSlot !== 0) {
-            console.log(`\n🔄 [NEW 1HR EVENT DETECTED] Sending previous event logs before starting ${liveSlug}...`);
-            await sendBatchToGoogleSheet();
+            if (doubleHitOccurred) {
+              await sendBatchToGoogleSheet(slotLogsQueue);
+            } else {
+              console.log(`ℹ️ [SLOT ENDED 1HR] No Double Hit in slot ${activeSlot}. Logs ignored.`);
+            }
           }
 
           activeSlot = currentSlot;
+          slotLogsQueue = [];
+          doubleHitOccurred = false;
 
           if (currentWs) { try { currentWs.close(); } catch (e) {} }
           if (pollingInterval) { clearInterval(pollingInterval); }
@@ -136,7 +125,7 @@ async function trackContinuousMarkets() {
           console.log(`📌 ${bannerText}`);
           console.log(`==================================================`);
 
-          pendingLogsQueue.push(["---", bannerText, "---", "---", "---", "---"]);
+          slotLogsQueue.push(["---", bannerText, "---", "---", "---", "---"]);
 
           const tokenIds = typeof market.clobTokenIds === "string" ? JSON.parse(market.clobTokenIds) : market.clobTokenIds;
           startSlotEngine(tokenIds[0], tokenIds[1], slotEndSlot, liveSlug);
@@ -156,19 +145,19 @@ async function trackContinuousMarkets() {
 
 function startSlotEngine(yesAsset, noAsset, slotEndTime, slug) {
   let yes1cPrinted = false, yes5cPrinted = false, no1cPrinted = false, no5cPrinted = false;
-  let yesHit = false, noHit = false, doubleHitAlertPrinted = false;
+  let yesHit = false, noHit = false;
 
   const queueLogForSheet = (timeET, timerStr, side, tier, priceVal) => {
-    pendingLogsQueue.push([timeET, slug, timerStr, side, tier, priceVal]);
-    console.log(`📝 [LOG BUFFERED 1HR] Total queued for this event: ${pendingLogsQueue.length}`);
+    slotLogsQueue.push([timeET, slug, timerStr, side, tier, priceVal]);
+    console.log(`📝 [LOG BUFFERED 1HR] Slot Queue count: ${slotLogsQueue.length}`);
   };
 
   const checkAndTriggerDoubleHit = (timeET, timerStr) => {
-    if (yesHit && noHit && !doubleHitAlertPrinted) {
-      doubleHitAlertPrinted = true;
+    if (yesHit && noHit && !doubleHitOccurred) {
+      doubleHitOccurred = true;
       const ticks = "✅✅✅✅✅✅✅✅✅✅";
       console.log(`\n${ticks} 1-HOUR DOUBLE HIT DETECTED! ${ticks}\n`);
-      pendingLogsQueue.push([timeET, slug, timerStr, `${ticks} BOTH SIDES HIT ${ticks}`, "DOUBLE_HIT", "ALERT"]);
+      slotLogsQueue.push([timeET, slug, timerStr, `${ticks} BOTH SIDES HIT ${ticks}`, "DOUBLE_HIT", "ALERT"]);
     }
   };
 
@@ -186,7 +175,6 @@ function startSlotEngine(yesAsset, noAsset, slotEndTime, slug) {
 
     const currentTimeET = new Date().toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "2-digit", minute: "2-digit", second: "2-digit" });
 
-    // 1 CENT TIER DETECTOR
     if (CONFIG_TARGET_TIERS.includes(0.01) && price <= 0.01) {
       if (isYes && !yes1cPrinted) {
         yes1cPrinted = true; yesHit = true;
@@ -201,7 +189,6 @@ function startSlotEngine(yesAsset, noAsset, slotEndTime, slug) {
         checkAndTriggerDoubleHit(currentTimeET, timerStr);
       }
     } 
-    // 5 CENT TIER DETECTOR
     else if (CONFIG_TARGET_TIERS.includes(0.05) && price <= 0.05) {
       if (isYes && !yes5cPrinted) {
         yes5cPrinted = true; yesHit = true;
