@@ -5,7 +5,7 @@ http.createServer((req, res) => {
   res.writeHead(200, { 'Content-Type': 'text/plain' });
   res.end('5-Min Bot is running alive 24/7!\n');
 }).listen(PORT, () => {
-  console.log(`Dummy server for 5-Min Bot listening on port ${PORT}`);
+  console.log(`Dummy server for 5-Min Bot listening on port ${3002}`);
 });
 
 const WebSocket = require("ws");
