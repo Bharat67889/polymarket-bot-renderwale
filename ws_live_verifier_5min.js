@@ -11,7 +11,6 @@ http.createServer((req, res) => {
 const WebSocket = require("ws");
 const axios = require("axios");
 
-// 📊 ALL 7 COINS CONFIGURATION (From your screenshots)
 const TRACKED_COINS = [
   { symbol: "BTC",  slugPrefix: "btc-updown-5m",  sheetTab: "Btc_5m" },
   { symbol: "ETH",  slugPrefix: "eth-updown-5m",  sheetTab: "Eth_5m" },
@@ -36,12 +35,10 @@ async function sendToGoogleSheet(sheetTab, rowsToSend) {
     }, { timeout: 30000 });
 
     if (res.data?.status === "success") {
-      console.log(`✅ [SHEET SYNC SUCCESS 5M] Summary log added to Tab: '${sheetTab}'`);
-    } else {
-      console.log(`⚠️ [SHEET SYNC WARN 5M] Tab '${sheetTab}' Response:`, res.data);
+      console.log(`✅ [SHEET SUCCESS] Log added to Tab: '${sheetTab}'`);
     }
   } catch (err) {
-    console.log(`❌ [SHEET ERROR 5M] Failed sending log to Tab: '${sheetTab}'`);
+    console.log(`❌ [SHEET ERROR] Failed sending log to Tab: '${sheetTab}'`);
   }
 }
 
@@ -55,22 +52,22 @@ function startCoinEngine(coinCfg) {
     console.log(`🚀 Starting 5M Engine for ${coinCfg.symbol} -> Tab: ${coinCfg.sheetTab}`);
 
     while (true) {
-      const now = Math.floor(Date.now() / 1000);
-      const currentSlot = now - (now % slotSeconds);
-      const slotEndSlot = currentSlot + slotSeconds;
+      try {
+        const now = Math.floor(Date.now() / 1000);
+        const currentSlot = now - (now % slotSeconds);
+        const slotEndSlot = currentSlot + slotSeconds;
 
-      if (currentSlot !== activeSlot) {
-        const liveSlug = `${coinCfg.slugPrefix}-${currentSlot}`;
-        const startDate = new Date(currentSlot * 1000);
-        const endDate = new Date(slotEndSlot * 1000);
+        if (currentSlot !== activeSlot) {
+          const liveSlug = `${coinCfg.slugPrefix}-${currentSlot}`;
+          const startDate = new Date(currentSlot * 1000);
+          const endDate = new Date(slotEndSlot * 1000);
 
-        const monthDay = startDate.toLocaleDateString("en-US", { timeZone: "America/New_York", month: "short", day: "numeric" });
-        const startTimeStr = startDate.toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "2-digit", minute: "2-digit", hour12: false });
-        const endTimeStr = endDate.toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "2-digit", minute: "2-digit", hour12: true });
+          const monthDay = startDate.toLocaleDateString("en-US", { timeZone: "America/New_York", month: "short", day: "numeric" });
+          const startTimeStr = startDate.toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "2-digit", minute: "2-digit", hour12: false });
+          const endTimeStr = endDate.toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "2-digit", minute: "2-digit", hour12: true });
 
-        const bannerText = `LIVE SLOT (5M - ${coinCfg.symbol}): ${monthDay}, ${startTimeStr}-${endTimeStr} ET | ${liveSlug}`;
+          const bannerText = `LIVE SLOT (5M - ${coinCfg.symbol}): ${monthDay}, ${startTimeStr}-${endTimeStr} ET | ${liveSlug}`;
 
-        try {
           const res = await axios.get(`https://gamma-api.polymarket.com/events?slug=${liveSlug}`, { timeout: 5000 });
           const market = res.data?.[0]?.markets?.find(m => m.active && !m.closed);
 
@@ -80,7 +77,7 @@ function startCoinEngine(coinCfg) {
             if (currentWs) { try { currentWs.close(); } catch (e) {} }
             if (pollingInterval) { clearInterval(pollingInterval); }
 
-            console.log(`\n📌 [5M ${coinCfg.symbol}] Connected Slot: ${liveSlug}`);
+            console.log(`📌 [5M ${coinCfg.symbol}] Active Slot: ${liveSlug}`);
 
             const tokenIds = typeof market.clobTokenIds === "string" ? JSON.parse(market.clobTokenIds) : market.clobTokenIds;
             const yesAsset = tokenIds[0];
@@ -97,7 +94,7 @@ function startCoinEngine(coinCfg) {
 
             currentWs = new WebSocket(WS_URL);
             currentWs.on("open", () => {
-              currentWs.send(JSON.stringify({ type: "market", assets_ids: [yesAsset, noAsset] }));
+              try { currentWs.send(JSON.stringify({ type: "market", assets_ids: [yesAsset, noAsset] })); } catch (e) {}
             });
 
             currentWs.on("message", (data) => {
@@ -122,7 +119,7 @@ function startCoinEngine(coinCfg) {
                 if (yesRes.data?.price) processPriceUpdate(yesAsset, parseFloat(yesRes.data.price));
                 if (noRes.data?.price) processPriceUpdate(noAsset, parseFloat(noRes.data.price));
               } catch (e) {}
-            }, 1000);
+            }, 1500);
 
             const checkSlotEndInterval = setInterval(() => {
               const nowSec = Math.floor(Date.now() / 1000);
@@ -132,10 +129,6 @@ function startCoinEngine(coinCfg) {
                 const commonLeastPrice = Math.max(minYesPrice, minNoPrice);
                 const centVal = Math.round(commonLeastPrice * 100);
                 const finishTimeET = new Date().toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "2-digit", minute: "2-digit", second: "2-digit" });
-
-                console.log(`\n🏁 [SLOT FINISHED 5M - ${coinCfg.symbol}] ${liveSlug}`);
-                console.log(`📊 UP Lowest: $${minYesPrice.toFixed(3)} | DOWN Lowest: $${minNoPrice.toFixed(3)}`);
-                console.log(`🔥 BOTH SIDES HIT AT LEAST: ${centVal}¢ ($${commonLeastPrice.toFixed(3)})\n`);
 
                 const rowsToSend = [
                   ["---", bannerText, "---", "---", "---", "---"],
@@ -157,18 +150,16 @@ function startCoinEngine(coinCfg) {
             await sleep(2000);
             continue;
           }
-        } catch (err) {
-          await sleep(3000);
-          continue;
         }
+        await sleep(2000);
+      } catch (err) {
+        console.log(`⚠️ Engine exception for ${coinCfg.symbol}, auto-restarting in 5s...`);
+        await sleep(5000);
       }
-
-      await sleep(2000);
     }
   }
 
   runLoop();
 }
 
-// Start parallel tracking engines for all 7 coins
 TRACKED_COINS.forEach(startCoinEngine);
