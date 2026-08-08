@@ -3,9 +3,9 @@ const PORT = process.env.PORT || 3002;
 
 http.createServer((req, res) => {
   res.writeHead(200, { 'Content-Type': 'text/plain' });
-  res.end('All 5-Min Crypto Coins Tracker running 24/7!\n');
+  res.end('All 5-Min Crypto Coins Tracker (HYPE Fixed) running 24/7!\n');
 }).listen(PORT, () => {
-  console.log(`Dummy server for 5-Min Multi-Coin Bot listening on port ${PORT}`);
+  console.log(`Dummy server listening on port ${PORT}`);
 });
 
 const WebSocket = require("ws");
@@ -26,6 +26,47 @@ const GOOGLE_SHEET_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbyBAt2
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
+// 🔍 SMART MARKET FETCH (Tries both /events and /markets API endpoints)
+async function fetchMarketData(slug) {
+  try {
+    const res = await axios.get(`https://gamma-api.polymarket.com/events?slug=${slug}`, { timeout: 4000 });
+    const event = res.data?.[0];
+    if (event && event.markets && event.markets.length > 0) {
+      const m = event.markets.find(m => m.active && !m.closed) || event.markets[0];
+      if (m) return m;
+    }
+  } catch (e) {}
+
+  try {
+    const res = await axios.get(`https://gamma-api.polymarket.com/markets?slug=${slug}`, { timeout: 4000 });
+    if (res.data && res.data.length > 0) {
+      return res.data[0];
+    }
+  } catch (e) {}
+
+  return null;
+}
+
+// 🧠 SMART TOKEN EXTRACTOR (Handles string, array, or token object differences)
+function extractTokenIds(market) {
+  if (!market) return null;
+  let raw = market.clobTokenIds || market.clob_token_ids;
+
+  if (!raw && market.tokens && Array.isArray(market.tokens)) {
+    return market.tokens.map(t => String(t.token_id));
+  }
+
+  if (typeof raw === 'string') {
+    try { raw = JSON.parse(raw); } catch (e) {}
+  }
+
+  if (Array.isArray(raw) && raw.length >= 2) {
+    return [String(raw[0]), String(raw[1])];
+  }
+
+  return null;
+}
+
 async function sendToGoogleSheet(sheetTab, rowsToSend) {
   if (!rowsToSend || rowsToSend.length === 0) return;
   try {
@@ -35,10 +76,10 @@ async function sendToGoogleSheet(sheetTab, rowsToSend) {
     }, { timeout: 30000 });
 
     if (res.data?.status === "success") {
-      console.log(`✅ [SHEET SUCCESS] Log added to Tab: '${sheetTab}'`);
+      console.log(`✅ [SHEET SUCCESS 5M] Summary log added to Tab: '${sheetTab}'`);
     }
   } catch (err) {
-    console.log(`❌ [SHEET ERROR] Failed sending log to Tab: '${sheetTab}'`);
+    console.log(`❌ [SHEET ERROR 5M] Failed sending log to Tab: '${sheetTab}'`);
   }
 }
 
@@ -49,7 +90,7 @@ function startCoinEngine(coinCfg) {
   let pollingInterval = null;
 
   async function runLoop() {
-    console.log(`🚀 Starting 5M Engine for ${coinCfg.symbol} -> Tab: ${coinCfg.sheetTab}`);
+    console.log(`🚀 Engine Initialized for ${coinCfg.symbol} -> Tab: ${coinCfg.sheetTab}`);
 
     while (true) {
       try {
@@ -68,18 +109,24 @@ function startCoinEngine(coinCfg) {
 
           const bannerText = `LIVE SLOT (5M - ${coinCfg.symbol}): ${monthDay}, ${startTimeStr}-${endTimeStr} ET | ${liveSlug}`;
 
-          const res = await axios.get(`https://gamma-api.polymarket.com/events?slug=${liveSlug}`, { timeout: 5000 });
-          const market = res.data?.[0]?.markets?.find(m => m.active && !m.closed);
+          const market = await fetchMarketData(liveSlug);
 
           if (market) {
+            const tokenIds = extractTokenIds(market);
+
+            if (!tokenIds || !tokenIds[0] || !tokenIds[1]) {
+              console.log(`⚠️ [${coinCfg.symbol}] Token IDs not found for slot ${liveSlug}, retrying...`);
+              await sleep(2000);
+              continue;
+            }
+
             activeSlot = currentSlot;
 
             if (currentWs) { try { currentWs.close(); } catch (e) {} }
             if (pollingInterval) { clearInterval(pollingInterval); }
 
-            console.log(`📌 [5M ${coinCfg.symbol}] Active Slot: ${liveSlug}`);
+            console.log(`📌 [5M ${coinCfg.symbol}] Connected Slot: ${liveSlug} (Tokens: ${tokenIds[0].substring(0, 8)}... / ${tokenIds[1].substring(0, 8)}...)`);
 
-            const tokenIds = typeof market.clobTokenIds === "string" ? JSON.parse(market.clobTokenIds) : market.clobTokenIds;
             const yesAsset = tokenIds[0];
             const noAsset = tokenIds[1];
 
@@ -119,7 +166,7 @@ function startCoinEngine(coinCfg) {
                 if (yesRes.data?.price) processPriceUpdate(yesAsset, parseFloat(yesRes.data.price));
                 if (noRes.data?.price) processPriceUpdate(noAsset, parseFloat(noRes.data.price));
               } catch (e) {}
-            }, 1500);
+            }, 2000);
 
             const checkSlotEndInterval = setInterval(() => {
               const nowSec = Math.floor(Date.now() / 1000);
@@ -129,6 +176,8 @@ function startCoinEngine(coinCfg) {
                 const commonLeastPrice = Math.max(minYesPrice, minNoPrice);
                 const centVal = Math.round(commonLeastPrice * 100);
                 const finishTimeET = new Date().toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "2-digit", minute: "2-digit", second: "2-digit" });
+
+                console.log(`🏁 [SLOT FINISHED 5M - ${coinCfg.symbol}] ${liveSlug} -> Hit at least ${centVal}¢`);
 
                 const rowsToSend = [
                   ["---", bannerText, "---", "---", "---", "---"],
@@ -153,8 +202,8 @@ function startCoinEngine(coinCfg) {
         }
         await sleep(2000);
       } catch (err) {
-        console.log(`⚠️ Engine exception for ${coinCfg.symbol}, auto-restarting in 5s...`);
-        await sleep(5000);
+        console.log(`⚠️ Exception for ${coinCfg.symbol}, auto-restarting in 4s...`);
+        await sleep(4000);
       }
     }
   }
