@@ -3,14 +3,13 @@ const PORT = process.env.PORT || 3000;
 
 http.createServer((req, res) => {
   res.writeHead(200, { 'Content-Type': 'text/plain' });
-  res.end('15-Min 1 Cent Double Hit Bot running 24/7!\n');
+  res.end('15-Min Lowest Common Price Tracker running 24/7!\n');
 }).listen(PORT);
 
 const WebSocket = require("ws");
 const axios = require("axios");
 
 const CONFIG_ASSET = "BTC_15M";
-const TARGET_PRICE = 0.01; // 1 Cent Target
 const WS_URL = "wss://ws-subscriptions-clob.polymarket.com/ws/market";
 const GOOGLE_SHEET_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbyBAt2zPfkNG7oT_fQbV9OOSBoQ8wPjuUg6GdPt4sr3XLI4zylU0To1YMV4wCwkpp_6/exec";
 
@@ -22,9 +21,9 @@ async function sendBatchToGoogleSheet(rowsToSend) {
   if (!rowsToSend || rowsToSend.length === 0) return;
   try {
     await axios.post(GOOGLE_SHEET_WEBHOOK_URL, { rows: rowsToSend }, { timeout: 30000 });
-    console.log("✅ [SHEET SYNC SUCCESS] Double Hit logs successfully sent to Google Sheet!");
+    console.log("✅ [SHEET SYNC SUCCESS] Event summary log added to Google Sheet!");
   } catch (err) {
-    console.log("❌ [SHEET SYNC ERROR] Failed to send logs to Google Sheet.");
+    console.log("❌ [SHEET SYNC ERROR] Failed to send log to Google Sheet.");
   }
 }
 
@@ -75,45 +74,28 @@ async function trackContinuousMarkets() {
 }
 
 function startSlotEngine(yesAsset, noAsset, slotEndTime, slug, bannerText) {
-  let yesHit = false, noHit = false;
-  let doubleHitOccurred = false;
-  let slotLogsQueue = [];
-
-  const queueLogForSheet = (timeET, timerStr, side, tier, priceVal) => {
-    slotLogsQueue.push([timeET, slug, timerStr, side, tier, priceVal]);
-  };
+  // Track absolute minimum prices hit during this 15-min slot
+  let minYesPrice = 1.0;
+  let minNoPrice = 1.0;
+  let yesHitTime = "N/A", noHitTime = "N/A";
 
   const processPriceUpdate = (assetId, price) => {
     if (isNaN(price) || price <= 0) return;
 
     const currentTimeET = new Date().toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "2-digit", minute: "2-digit", second: "2-digit" });
-    const nowSec = Math.floor(Date.now() / 1000);
-    const secsLeft = Math.max(0, slotEndTime - nowSec);
-    const mins = String(Math.floor(secsLeft / 60)).padStart(2, "0");
-    const secs = String(secsLeft % 60).padStart(2, "0");
-    const timerStr = `${mins}m ${secs}s`;
 
-    // Check 1 Cent ($0.01) Hit Conditions
-    if (price <= TARGET_PRICE) {
-      if (assetId === yesAsset && !yesHit) {
-        yesHit = true;
-        console.log(`🔥 [${currentTimeET} ET] (Timer: ${timerStr}) -> UP (YES) TOUCHED 1¢! ($${price.toFixed(3)})`);
-        queueLogForSheet(currentTimeET, timerStr, "UP (YES)", "1¢", price.toFixed(3));
-      }
+    // Track lowest YES price
+    if (assetId === yesAsset && price < minYesPrice) {
+      minYesPrice = price;
+      yesHitTime = currentTimeET;
+      console.log(`📉 [NEW LOW - UP (YES)] $${minYesPrice.toFixed(3)} at ${currentTimeET}`);
+    }
 
-      if (assetId === noAsset && !noHit) {
-        noHit = true;
-        console.log(`🔥 [${currentTimeET} ET] (Timer: ${timerStr}) -> DOWN (NO) TOUCHED 1¢! ($${price.toFixed(3)})`);
-        queueLogForSheet(currentTimeET, timerStr, "DOWN (NO)", "1¢", price.toFixed(3));
-      }
-
-      // Check Double Hit Trigger
-      if (yesHit && noHit && !doubleHitOccurred) {
-        doubleHitOccurred = true;
-        const ticks = "✅✅✅✅✅✅✅✅✅✅";
-        console.log(`\n${ticks} 15-MIN DOUBLE HIT DETECTED AT 1¢! ${ticks}\n`);
-        slotLogsQueue.push([currentTimeET, slug, timerStr, `${ticks} BOTH SIDES HIT 1¢ ${ticks}`, "DOUBLE_HIT", "ALERT"]);
-      }
+    // Track lowest NO price
+    if (assetId === noAsset && price < minNoPrice) {
+      minNoPrice = price;
+      noHitTime = currentTimeET;
+      console.log(`📉 [NEW LOW - DOWN (NO)] $${minNoPrice.toFixed(3)} at ${currentTimeET}`);
     }
   };
 
@@ -144,22 +126,35 @@ function startSlotEngine(yesAsset, noAsset, slotEndTime, slug, bannerText) {
     } catch (e) {}
   }, 1000);
 
-  // SLOT END MONITORING: Only send batch if DOUBLE HIT occurred
+  // SLOT END MONITORING: Send calculated summary when 15-min slot finishes
   const checkSlotEndInterval = setInterval(() => {
     const nowSec = Math.floor(Date.now() / 1000);
     if (nowSec >= slotEndTime) {
       clearInterval(checkSlotEndInterval);
 
-      if (doubleHitOccurred) {
-        console.log(`\n🏁 [SLOT FINISHED] ${slug} -> Sending Double Hit Logs to Sheet...`);
-        const finalBatch = [
-          ["---", bannerText, "---", "---", "---", "---"],
-          ...slotLogsQueue
-        ];
-        sendBatchToGoogleSheet(finalBatch);
-      } else {
-        console.log(`\nℹ️ [SLOT FINISHED] ${slug} -> No 1¢ Double Hit. Ignored (Nothing sent to Sheet).`);
-      }
+      // Math.max gives the lowest common point where BOTH sides touched
+      const commonLeastPrice = Math.max(minYesPrice, minNoPrice);
+      const centVal = Math.round(commonLeastPrice * 100);
+
+      const finishTimeET = new Date().toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "2-digit", minute: "2-digit", second: "2-digit" });
+
+      console.log(`\n🏁 [SLOT FINISHED] ${slug}`);
+      console.log(`📊 UP (YES) Lowest: $${minYesPrice.toFixed(3)} | DOWN (NO) Lowest: $${minNoPrice.toFixed(3)}`);
+      console.log(`🔥 BOTH SIDES HIT AT LEAST: ${centVal}¢ ($${commonLeastPrice.toFixed(3)})\n`);
+
+      const rowsToSend = [
+        ["---", bannerText, "---", "---", "---", "---"],
+        [
+          finishTimeET,
+          slug,
+          "SLOT_END",
+          `✅ BOTH SIDES HIT AT LEAST ${centVal}¢`,
+          `UP Min: $${minYesPrice.toFixed(3)} | DOWN Min: $${minNoPrice.toFixed(3)}`,
+          `$${commonLeastPrice.toFixed(3)}`
+        ]
+      ];
+
+      sendBatchToGoogleSheet(rowsToSend);
     }
   }, 3000);
 }
