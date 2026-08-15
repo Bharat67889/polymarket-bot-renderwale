@@ -9,8 +9,12 @@ module.exports = {
       script: "./ws_live_verifier_1hr.js"
     },
     {
-      name: "btc-5min-bot",
+      name: "all-coins-5min-bot",
       script: "./ws_live_verifier_5min.js"
+    },
+    {
+      name: "eth-auto-placer",
+      script: "./placer_eth_auto.js"
     }
   ]
 };
