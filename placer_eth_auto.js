@@ -13,8 +13,8 @@ const { privateKeyToAccount } = require("viem/accounts");
 const TRADE_AMOUNT = 5; 
 const BUY_PRICE = 0.05; 
 const MAX_FUTURE_SLOTS_TO_SCAN = 300; 
-const SCAN_INTERVAL_MS = 3 * 60 * 1000; // Har 3 minute me auto-run hoga
-
+const SCAN_INTERVAL_MS = 1 * 60 * 1000; // Har 3 minute me auto-run hoga
+ 
 const SIGNATURE_TYPE = 3; 
 const FUNDER_ADDRESS = "0x477dA82D73bc10f70Ad0978293B470042e3262cA";
 const TARGET_SHEET_NAME = "eth5minplaced";
