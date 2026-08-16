@@ -10,9 +10,12 @@ const TELEGRAM_CHAT_ID = "6973463545";
 const BALANCE_SHEET_TAB = "Daily_Balance";
 const GOOGLE_SHEET_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbyBAt2zPfkNG7oT_fQbV9OOSBoQ8wPjuUg6GdPt4sr3XLI4zylU0To1YMV4wCwkpp_6/exec";
 
-// Polygon Bridged USDC (Polymarket standard token)
+// Polygon Bridged USDC
 const USDC_ADDRESS = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174";
-const publicClient = createPublicClient({ chain: polygon, transport: http("https://polygon-rpc.com") });
+const publicClient = createPublicClient({ 
+  chain: polygon, 
+  transport: http("https://rpc.ankr.com/polygon") 
+});
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 let lastLoggedDay = null;
@@ -48,7 +51,7 @@ async function sendTelegramAlert(message) {
 
 async function sendToGoogleSheet(rowsToSend) {
   try {
-    const res = await axios.post(GOOGLE_SHEET_WEBHOOK_URL, { 
+    await axios.post(GOOGLE_SHEET_WEBHOOK_URL, { 
       sheetName: BALANCE_SHEET_TAB, 
       rows: rowsToSend 
     }, { timeout: 30000 });
@@ -90,14 +93,11 @@ async function logDailyBalanceSnapshot() {
 
 async function startBalanceDaemon() {
   console.log("🚀 Daily Balance Notifier Daemon Initialized...");
-  
-  // Script start hote hi instant snapshot bhejega verify karne ke liye
   await logDailyBalanceSnapshot();
 
   while (true) {
     try {
       const now = new Date();
-      // Daily 12:00 AM Midnight ET (subah ~9:30 AM IST) trigger
       const todayStr = now.toLocaleDateString("en-US", { timeZone: "America/New_York" });
       const currentHour = now.toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "numeric", hour12: false });
 
@@ -108,7 +108,6 @@ async function startBalanceDaemon() {
     } catch (e) {
       console.log("⚠️ Balance check loop error:", e.message);
     }
-    // Check every 1 minute
     await sleep(60 * 1000);
   }
 }
