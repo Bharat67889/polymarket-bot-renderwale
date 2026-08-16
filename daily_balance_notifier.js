@@ -32,7 +32,7 @@ async function getPolymarketBalance() {
     const account = privateKeyToAccount(pk);
     const walletClient = createWalletClient({
       account,
-      transport: http()
+      transport: http("https://polygon-bor-rpc.publicnode.com")
     });
 
     const initClient = new ClobClient({
@@ -126,8 +126,6 @@ async function logDailyBalanceSnapshot() {
 
 async function startBalanceDaemon() {
   console.log("🚀 Daily Balance Notifier Daemon Initialized...");
-  
-  // Instant snapshot test on startup
   await logDailyBalanceSnapshot();
 
   while (true) {
@@ -136,7 +134,6 @@ async function startBalanceDaemon() {
       const todayStr = now.toLocaleDateString("en-US", { timeZone: "America/New_York" });
       const currentHour = now.toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "numeric", hour12: false });
 
-      // Daily Midnight 12:00 AM ET (9:30 AM IST)
       if (currentHour === "0" && lastLoggedDay !== todayStr) {
         lastLoggedDay = todayStr;
         await logDailyBalanceSnapshot();
