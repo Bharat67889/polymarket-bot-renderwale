@@ -10,6 +10,8 @@ const { privateKeyToAccount } = require("viem/accounts");
 
 const SIGNATURE_TYPE = 3;
 const FUNDER_ADDRESS = "0x477dA82D73bc10f70Ad0978293B470042e3262cA";
+
+// ⚠️ BotFather se token tap karke yahan paste karo (Ensure no typo/spaces)
 const TELEGRAM_BOT_TOKEN = "8840092611:AAG11_0hcWt5JiPSK_uV23v5rFY1ro_bpG8";
 const TELEGRAM_CHAT_ID = "6973463545";
 
@@ -71,14 +73,15 @@ async function getPolymarketBalance() {
 
 async function sendTelegramAlert(message) {
   try {
-    await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
-      chat_id: TELEGRAM_CHAT_ID,
+    const cleanToken = TELEGRAM_BOT_TOKEN.trim();
+    await axios.post(`https://api.telegram.org/bot${cleanToken}/sendMessage`, {
+      chat_id: TELEGRAM_CHAT_ID.trim(),
       text: message,
       parse_mode: "Markdown"
     });
     console.log("📱 [TELEGRAM SUCCESS] Notification sent to phone!");
   } catch (err) {
-    console.log("❌ [TELEGRAM ERROR] Failed sending alert:", err.message);
+    console.log(`❌ [TELEGRAM ERROR ${err.response?.status || ''}] ${err.response?.data?.description || err.message}`);
   }
 }
 
@@ -115,11 +118,10 @@ async function logDailyBalanceSnapshot() {
   }
   lastRecordedBalance = balance;
 
-  // 1. Google Sheet Log
-  const sheetRow = [[`${dateET} (${timeET} ET)`, `$${balance.toFixed(2)}`, diffText, `${dateIST} ${timeIST} IST`]];
+  // Single quote (' ) prevents Google Sheet formula parse error
+  const sheetRow = [[`${dateET} (${timeET} ET)`, `$${balance.toFixed(2)}`, `'${diffText}`, `${dateIST} ${timeIST} IST`]];
   await sendToGoogleSheet(sheetRow);
 
-  // 2. Telegram Alert
   const teleMsg = `📊 *Polymarket Daily Balance Report*\n\n📅 Date: *${dateET}*\n⏰ Time: *${timeET} ET* (${timeIST} IST)\n💰 Balance: *$${balance.toFixed(2)} USDC*\n📈 24h P&L: *${diffText}*`;
   await sendTelegramAlert(teleMsg);
 }
