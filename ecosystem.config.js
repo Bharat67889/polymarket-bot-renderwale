@@ -15,6 +15,10 @@ module.exports = {
     {
       name: "eth-auto-placer",
       script: "./placer_eth_auto.js"
+    },
+    {
+      name: "daily-balance-bot",
+      script: "./daily_balance_notifier.js"
     }
   ]
 };
