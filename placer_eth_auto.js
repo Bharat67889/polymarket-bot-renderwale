@@ -16,7 +16,7 @@ const { privateKeyToAccount } = require("viem/accounts");
 const TRADE_AMOUNT = 5; 
 const BUY_PRICE = 0.05; 
 const MAX_FUTURE_SLOTS_TO_SCAN = 300; 
-const SLOTS_TO_TARGET = 3; // Top 3 Furthest slots ko simultaneously check aur fill karega
+const SLOTS_TO_TARGET = 5; // Top 5 Furthest slots ko simultaneously check aur fill karega
 const SCAN_INTERVAL_MS = 1 * 60 * 1000; // Har 1 minute me auto-scan hoga
  
 const SIGNATURE_TYPE = 3; 
