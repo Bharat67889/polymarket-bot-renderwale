@@ -12,7 +12,7 @@ const SIGNATURE_TYPE = 3;
 const FUNDER_ADDRESS = "0x477dA82D73bc10f70Ad0978293B470042e3262cA";
 
 // ⚠️ BotFather se token tap karke yahan paste karo (Ensure no typo/spaces)
-const TELEGRAM_BOT_TOKEN = "840092611:AAGl1_OhcWt5JiPSK_uV23v5rFY1ro_bpG8";
+const TELEGRAM_BOT_TOKEN = "8840092611:AAGl1_OhcWt5JiPSK_uV23v5rFY1ro_bpG8";
 
 
 const TELEGRAM_CHAT_ID = "6973463545";
